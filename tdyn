@@ -1,0 +1,132 @@
+#!/usr/bin/perl -w
+use strict;
+use Pod::Usage;
+use Getopt::Long;
+use Config::General;
+use Proc::Daemon; use Proc::PID::File;
+use Socket;
+use LWP::Simple; use LWP::UserAgent;
+use MIME::Base64;
+
+our $APP = 'tdyn';
+our $VERSION = '0.1';
+
+my $configfile; our $conf; our %config;
+my $die;
+my $ua = new LWP::UserAgent;
+
+sub usage
+{
+	pod2usage(
+		msg			=> "$APP v$VERSION",
+		verbose	=> 1,
+		exitval	=> 0,
+	);
+}
+
+sub config_init
+{
+	my @configpaths = (
+		'tdyn.conf',
+		'/etc/tdyn.conf',
+	);
+	for (@configpaths) {
+		$configfile = $_ if -e $_;
+	}
+	die "Configuration file not found.\n!" unless $configfile;
+}
+
+sub config_load
+{
+	$conf = new Config::General(
+		'-ConfigFile'	=> $configfile,
+		'CComments'		=> 1,
+	);
+	%config = $conf->getall;
+	my @configparams = ('username', 'password', 'domains', 'logfile');
+	for (@configparams) {
+		warn "$_ not found in config file.\n" and $die = 1 unless $config{$_};
+	}
+	die "Various errors occurred while parsing config file.\n" if $die;
+	$config{'domains'} =~ s/\s+//;
+}
+
+sub daemon
+{
+	Proc::Daemon::Init();
+	if (Proc::PID::File->running()) {
+		exit(0);
+	}
+}
+
+sub currentip
+{
+	my $ip = get('http://www.whatismyip.org/');
+	warn "Could not obtain current IP address.\n" unless $ip;
+	return $ip;
+}
+
+sub updateip
+{
+	my @hosts = split(/,/, $config{'domains'});
+	my $auth = encode_base64("$config{'username'}:$config{'password'}");
+	my @headers = (
+		'User-Agent'		=> 'tdyn',
+		'Authorization'	=> "Basic $auth",
+	);
+	for (@hosts) {
+		my $ip = &currentip;
+		if ($ip) {
+			my $hostip = inet_ntoa(inet_aton($_));
+			if ($hostip ne $ip) {
+				my $update = $ua->get("https://members.dyndns.org/nic/update?hostname=$_&myip=$ip&wildcard=NOCHG&mx=NOCHG&backmx=NOCHG", @headers);
+				if ($update->is_success) {
+					print $update->decoded_content;
+				} else {
+					warn $update->status_line;
+				}
+			}
+		}
+	}
+}
+
+GetOptions(
+	'c|config'	=> sub { $configfile = $ARGV if -e @ARGV or die "Configuration file not found.\n" },
+	'd|daemon'	=> \&daemon,
+	'v|version'	=> sub { print "$APP v$VERSION\n" and exit 0; },
+	'h|help'		=> \&usage,
+	  'man'			=> sub { pod2usage( verbose => 3 ); },
+);
+
+&config_init unless $configfile;
+&config_load;
+while (1) { &updateip; sleep 60; }
+
+=pod
+
+=head1 NAME
+
+tdyn - A simple dynamic dns systems IP address updater.
+
+=head1 USAGE
+
+  -c,   --config      load a config file
+  -d,   --daemon      run tdyn as daemon
+  -v,   --version     show version number and quit
+  -h,   --help        show an help
+        --man         show the manpage
+
+=head1 CONFIGURATION
+
+tdyn will look for a configuration file in the following locations, in
+this
+order:
+
+  ./tdyn.conf
+  /etc/tdyn.conf
+
+You can find an example configuration file in docs/tdyn.conf.example.
+
+=cut
+
+# vim:set ts=2
