@@ -1,0 +1,16 @@
+#
+#                  tdyn.conf - pimpd2 configuration file
+#
+# tdyn.conf is the configuration file for tdyn. Pimpd2 first searches
+# for it at ./tdyn.conf then at /etc/tdyn.conf. You can specify a configuration
+# file by giving it as argument with -c.
+#
+# C style comment blocks (/* comment */) and lines starting with a '#'
+# character are ignored. A parameter can have several values; separate them
+# with a comma character.
+#
+
+username = tdyn
+password = dapassword
+domains = blargh.dyndns.org
+logfile = /var/log/tdyn.log
