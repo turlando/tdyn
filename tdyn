@@ -101,3 +101,33 @@ GetOptions(
 
 &config_init unless $configfile;;
 &config_load;
+while (1) { &updateip; sleep 60; }
+
+=pod
+
+=head1 NAME
+
+tdyn - A simple dynamic dns systems IP address updater.
+
+=head1 USAGE
+
+  -c,   --config      load a configuration file
+  -d,   --daemon      run tdyn as daemon
+  -v,   --version     show version number and quit
+  -h,   --help        show an help
+        --man         show the manpage
+
+=head1 CONFIGURATION
+
+tdyn will look for a configuration file in the following locations, in
+this
+order:
+
+  ./tdyn.conf
+  /etc/tdyn.conf
+
+You can find an example configuration file in docs/tdyn.conf.example.
+
+=cut
+
+# vim:set ts=2
