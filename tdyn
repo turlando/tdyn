@@ -10,22 +10,21 @@ use MIME::Base64;
 
 our $APP = 'tdyn';
 our $VERSION = '0.1';
-
-my $configfile; our $conf; our %config;
-my $die;
+my $configfile; my %config;
 my $ua = new LWP::UserAgent;
 
 sub usage
 {
 	pod2usage(
-		msg			=> "$APP v$VERSION",
-		verbose	=> 1,
-		exitval	=> 0,
+		msg     => "$APP v$VERSION",
+		verbose => 1,
+		exitval => 0,
 	);
 }
 
 sub config_init
 {
+	$configfile = $_[0] and last if $_[0] and -e $_[0];
 	my @configpaths = (
 		'tdyn.conf',
 		'/etc/tdyn.conf',
@@ -33,22 +32,24 @@ sub config_init
 	for (@configpaths) {
 		$configfile = $_ if -e $_;
 	}
-	die "Configuration file not found.\n!" unless $configfile;
+	die "Config file not found in default paths.\nUse -c to set a config file path or see --man for more infos.\n" unless $configfile;
 }
 
 sub config_load
 {
-	$conf = new Config::General(
-		'-ConfigFile'	=> $configfile,
-		'CComments'		=> 1,
+	my $conf = new Config::General(
+		'-ConfigFile' => $configfile,
+		'--CComments' => 1,
 	);
 	%config = $conf->getall;
-	my @configparams = ('username', 'password', 'domains', 'logfile');
+	my @configparams = ('username', 'password', 'domains');
+	my @missingparams;
 	for (@configparams) {
-		warn "$_ not found in config file.\n" and $die = 1 unless $config{$_};
+		push(@missingparams, $_) unless $config{$_};
 	}
-	die "Various errors occurred while parsing config file.\n" if $die;
-	$config{'domains'} =~ s/\s+//;
+	last if $#missingparams < 1;
+	my $missingparamslist = join(', ', @missingparams);
+	die "$missingparamslist params not found in config file.\n";	
 }
 
 sub daemon
@@ -71,8 +72,8 @@ sub updateip
 	my @hosts = split(/,/, $config{'domains'});
 	my $auth = encode_base64("$config{'username'}:$config{'password'}");
 	my @headers = (
-		'User-Agent'		=> 'tdyn',
-		'Authorization'	=> "Basic $auth",
+		'User-Agent'    => 'tdyn',
+		'Authorization' => "Basic $auth",
 	);
 	for (@hosts) {
 		my $ip = &currentip;
@@ -91,42 +92,12 @@ sub updateip
 }
 
 GetOptions(
-	'c|config'	=> sub { $configfile = $ARGV if -e @ARGV or die "Configuration file not found.\n" },
-	'd|daemon'	=> \&daemon,
-	'v|version'	=> sub { print "$APP v$VERSION\n" and exit 0; },
-	'h|help'		=> \&usage,
-	  'man'			=> sub { pod2usage( verbose => 3 ); },
+	'c|config'  => \&config_init($ARGV),
+	'd|daemon'  => \&daemon,
+	'v|version' => sub { print "$APP v$VERSION\n"; exit 0; },
+	'h|help'    => \&usage,
+	  'man'     => sub { pod2usage( verbose => 3 ); },
 );
 
-&config_init unless $configfile;
+&config_init unless $configfile;;
 &config_load;
-while (1) { &updateip; sleep 60; }
-
-=pod
-
-=head1 NAME
-
-tdyn - A simple dynamic dns systems IP address updater.
-
-=head1 USAGE
-
-  -c,   --config      load a config file
-  -d,   --daemon      run tdyn as daemon
-  -v,   --version     show version number and quit
-  -h,   --help        show an help
-        --man         show the manpage
-
-=head1 CONFIGURATION
-
-tdyn will look for a configuration file in the following locations, in
-this
-order:
-
-  ./tdyn.conf
-  /etc/tdyn.conf
-
-You can find an example configuration file in docs/tdyn.conf.example.
-
-=cut
-
-# vim:set ts=2
