@@ -24,7 +24,7 @@ sub usage
 
 sub config_init
 {
-	$configfile = $_[0] and last if $_[0] and -e $_[0];
+	$configfile = $_[0] and return 0 if $_[0] and -e $_[0];
 	my @configpaths = (
 		'tdyn.conf',
 		'/etc/tdyn.conf',
@@ -39,7 +39,7 @@ sub config_load
 {
 	my $conf = new Config::General(
 		'-ConfigFile' => $configfile,
-		'--CComments' => 1,
+		'-CComments' => 1,
 	);
 	%config = $conf->getall;
 	my @configparams = ('username', 'password', 'domains');
@@ -47,17 +47,25 @@ sub config_load
 	for (@configparams) {
 		push(@missingparams, $_) unless $config{$_};
 	}
-	last if $#missingparams < 1;
+	return if $#missingparams < 1;
 	my $missingparamslist = join(', ', @missingparams);
-	die "$missingparamslist params not found in config file.\n";	
+	die "$missingparamslist params not found in config file.\n";
 }
 
 sub daemon
 {
-	Proc::Daemon::Init();
+	Proc::Daemon::Init(
+		pid_file => '/var/run/tdyn.pid',
+	);
 	if (Proc::PID::File->running()) {
 		exit(0);
 	}
+}
+
+sub kill_daemon
+{
+	my $pid = Proc::Daemon::Status('/var/run/tdyn.pid');
+	Proc::Daemon::Kill_Daemon($pid);
 }
 
 sub currentip
@@ -92,14 +100,15 @@ sub updateip
 }
 
 GetOptions(
-	'c|config'  => \&config_init($ARGV),
+	'c|config'  => sub { &config_init($ARGV); } ,
 	'd|daemon'  => \&daemon,
+	'k|kill'    => \&kill_daemoni,
 	'v|version' => sub { print "$APP v$VERSION\n"; exit 0; },
 	'h|help'    => \&usage,
 	  'man'     => sub { pod2usage( verbose => 3 ); },
 );
 
-&config_init unless $configfile;;
+&config_init unless $configfile;
 &config_load;
 while (1) { &updateip; sleep 60; }
 
