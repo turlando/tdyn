@@ -1,16 +1,19 @@
 #!/usr/bin/perl -w
 use strict;
+use feature 'switch';
 use Pod::Usage;
+use POSIX qw(strftime);
 use Getopt::Long;
 use Config::General;
 use Proc::Daemon; use Proc::PID::File;
 use Socket;
-use LWP::Simple; use LWP::UserAgent;
+use LWP::Simple; use LWP::UserAgent; use HTTP::Request::Common;
 use MIME::Base64;
 
 our $APP = 'tdyn';
-our $VERSION = '0.1';
+our $VERSION = '0.2';
 my $configfile; my %config;
+my $logfile;
 my $ua = new LWP::UserAgent;
 
 sub usage
@@ -22,9 +25,14 @@ sub usage
 	);
 }
 
+sub logme
+{
+	print STDERR "[",strftime("%D %T", localtime),"] $_[0]";
+}
+
 sub config_init
 {
-	$configfile = $_[0] and return 0 if $_[0] and -e $_[0];
+	$configfile = $_[0] and return if $_[0] and -e $_[0];
 	my @configpaths = (
 		'tdyn.conf',
 		'/etc/tdyn.conf',
@@ -50,6 +58,7 @@ sub config_load
 	return if $#missingparams < 1;
 	my $missingparamslist = join(', ', @missingparams);
 	die "$missingparamslist params not found in config file.\n";
+	open (STDERR, ">>$config{'logfile'}") or die "Unable to open logfile.\n" if $config{'logfile'};
 }
 
 sub daemon
@@ -70,9 +79,12 @@ sub kill_daemon
 
 sub currentip
 {
-	my $ip = get('http://www.whatismyip.org/');
-	warn "Could not obtain current IP address.\n" unless $ip;
-	return $ip;
+	my $ip = $ua->get('http://www.whatismyip.org/');
+	if ($ip->is_success) {
+		return $ip->content;
+	} else {
+		logme "Unable to obtain ip: $ip->status_line\n";
+	}
 }
 
 sub updateip
@@ -83,16 +95,28 @@ sub updateip
 		'User-Agent'    => 'tdyn',
 		'Authorization' => "Basic $auth",
 	);
-	for (@hosts) {
+	foreach my $host (@hosts) {
 		my $ip = &currentip;
 		if ($ip) {
-			my $hostip = inet_ntoa(inet_aton($_));
+			my $hostip = inet_ntoa(inet_aton($host));
 			if ($hostip ne $ip) {
-				my $update = $ua->get("https://members.dyndns.org/nic/update?hostname=$_&myip=$ip&wildcard=NOCHG&mx=NOCHG&backmx=NOCHG", @headers);
+				my $update = $ua->get("https://members.dyndns.org/nic/update?hostname=$host&myip=$ip&wildcard=NOCHG&mx=NOCHG&backmx=NOCHG", @headers);
 				if ($update->is_success) {
-					print $update->decoded_content;
+					given ($update->decoded_content) {
+						when (/good/)     { logme "$host updated successfully.\n"; last; }
+						when (/abuse/)    { logme "$host has been blocked.\n"; }
+						when (/badagent/) { logme "Useragent has been blocked.\n"; }
+						when (/badauth/)  { logme "Username or password wrong for account $config{'username'}.\n"; }
+						when (/badsys/)   { logme "Bad system parameter.\n"; }
+						when (/dnserr/)   { logme "DNS inconsistency.\n"; }
+						when (/!donator/) { logme "Trying to access to a paid account feature account $config{'username'} which is free.\n"; }
+						when (/nohost/)   { logme "No such host $host registred to DynDNS.\n";}
+						when (/notfqdn/)  { logme "$host is and invalid hostname format.\n"; }
+						when (/numhost/)  { logme "A serious error ha occurred for $_.\n"; }
+						when (/!yours/)   { logme "$host does not belong to $config{'username'}.\n"; }
+					}
 				} else {
-					warn $update->status_line;
+					logme "$update->status_line occurred while updating the ip.\n";
 				}
 			}
 		}
@@ -102,7 +126,7 @@ sub updateip
 GetOptions(
 	'c|config'  => sub { &config_init($ARGV); } ,
 	'd|daemon'  => \&daemon,
-	'k|kill'    => \&kill_daemoni,
+	'k|kill'    => \&kill_daemon,
 	'v|version' => sub { print "$APP v$VERSION\n"; exit 0; },
 	'h|help'    => \&usage,
 	  'man'     => sub { pod2usage( verbose => 3 ); },
